@@ -472,6 +472,89 @@ function RosterEditor({ students, setStudents }){
   );
 }
 
+/* ---- パスワード認証画面 ---- */
+function AuthGate({ classId, onAuth }){
+  // ▼本番: localStorage からハッシュを読む
+  // const PASS_KEY = `asa_pw_${classId}`;
+  // const savedHash = localStorage.getItem(PASS_KEY) || "";
+  // ▼動作確認用: React state で代用（App から渡す）
+  const [input, setInput] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [error, setError] = useState("");
+  const [showPass, setShowPass] = useState(false);
+
+  // 簡易ハッシュ（本番でも平文よりはマシな難読化）
+  const hash=(s)=> s.split("").reduce((a,c)=>(a*31+c.charCodeAt(0))>>>0,0).toString(36);
+
+  const { savedHash, setSavedHash } = onAuth; // Appから受け取る
+  const isNew = !savedHash;
+
+  const submit=()=>{
+    if(isNew){
+      if(input.length < 4){ setError("4文字以上で設定してください"); return; }
+      if(input !== confirm){ setError("パスワードが一致しません"); return; }
+      setSavedHash(hash(input));
+      // ▼本番: localStorage.setItem(PASS_KEY, hash(input));
+      onAuth.onSuccess();
+    } else {
+      if(hash(input) === savedHash){ onAuth.onSuccess(); }
+      else { setError("パスワードが違います"); setInput(""); }
+    }
+  };
+
+  return (
+    <div style={{textAlign:"center",paddingTop:40}}>
+      <div style={{fontSize:44}}>🔐</div>
+      <h2 style={{fontWeight:800,color:"#cc6a2c",margin:"8px 0 4px"}}>先生モード</h2>
+      <p style={{fontSize:13,color:"#999",marginBottom:24}}>
+        {isNew ? "初回：パスワードを設定してください" : "パスワードを入力してください"}
+      </p>
+      <div className="card" style={{textAlign:"left"}}>
+        <div style={{position:"relative",marginBottom:12}}>
+          <input
+            type={showPass?"text":"password"}
+            className="answer-in"
+            style={{fontSize:22,paddingRight:48}}
+            placeholder={isNew?"新しいパスワード":"パスワード"}
+            value={input}
+            onChange={e=>{setInput(e.target.value);setError("");}}
+            onKeyDown={e=>e.key==="Enter"&&(isNew?document.getElementById("pw-confirm")?.focus():submit())}
+            autoFocus
+          />
+          <button onClick={()=>setShowPass(v=>!v)}
+            style={{position:"absolute",right:14,top:"50%",transform:"translateY(-50%)",
+              background:"none",color:"#cc8a6a",fontSize:18,padding:4}}>
+            {showPass?"🙈":"👁"}
+          </button>
+        </div>
+        {isNew && (
+          <div style={{position:"relative",marginBottom:12}}>
+            <input
+              id="pw-confirm"
+              type={showPass?"text":"password"}
+              className="answer-in"
+              style={{fontSize:22}}
+              placeholder="もう一度入力"
+              value={confirm}
+              onChange={e=>{setConfirm(e.target.value);setError("");}}
+              onKeyDown={e=>e.key==="Enter"&&submit()}
+            />
+          </div>
+        )}
+        {error && <p style={{color:"#e85a5a",fontWeight:700,fontSize:14,marginBottom:8,textAlign:"center"}}>{error}</p>}
+        <button className="btn-main" style={{fontSize:18}} onClick={submit}>
+          {isNew?"パスワードを設定する":"入室する"}
+        </button>
+        {!isNew && (
+          <p style={{fontSize:12,color:"#bbb",textAlign:"center",marginTop:10}}>
+            ※ パスワードを忘れた場合は管理者にご連絡ください
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /* ---- ルート ---- */
 function App(){
   // URLパラメータからクラスIDを取得（例: ?class=3-1）
@@ -482,21 +565,25 @@ function App(){
 
   // ▼本番: ストアキーにclassIdを含める
   // const STORE_KEY = `asa_gakushu_${classId}_v1`;
+  // const PASS_KEY  = `asa_pw_${classId}`;
   // function loadStore(){ try{ return JSON.parse(localStorage.getItem(STORE_KEY))||{}; }catch(e){ return {}; } }
   // function saveStore(d){ localStorage.setItem(STORE_KEY, JSON.stringify(d)); }
 
   const DEFAULT_STUDENTS = ["（名前）さん１","（名前）さん２","（名前）さん３"];
 
-  const [view, setView] = useState("home");
-  const [tab, setTab] = useState("roster"); // roster | pool | dash  ← 初回は名簿から
+  const [view, setView] = useState("home"); // home | kid | auth | teacher
+  const [tab, setTab] = useState("roster");
   const [students, setStudents] = useState(DEFAULT_STUDENTS);
-  // ▼本番: useState(loadStore().students || DEFAULT_STUDENTS)
   const [student, setStudent] = useState(null);
   const [records, setRecords] = useState([]);
   const [pool, setPool] = useState({ calcUnits:["c2-かけ算","c3-わり算"], kanjiUnits:["k2-動き","k3-動き"] });
 
-  // 選択中の生徒（初期値: 名簿の先頭）
+  // パスワードハッシュ（本番は localStorage.getItem(PASS_KEY) で初期化）
+  const [savedHash, setSavedHash] = useState("");
+  // ▼本番: useState(localStorage.getItem(PASS_KEY) || "")
+
   const currentStudent = student || students[0];
+  const classLabel = classId==="default" ? "クラス未設定" : `${classId}`;
 
   const record=(rec)=>{
     setRecords(prev=>{
@@ -506,8 +593,6 @@ function App(){
       return next;
     });
   };
-
-  const classLabel = classId==="default" ? "クラス未設定" : `${classId}`;
 
   if(view==="home") return (
     <div style={{textAlign:"center",paddingTop:40}}>
@@ -534,7 +619,10 @@ function App(){
           style={{opacity:students[0]===DEFAULT_STUDENTS[0]?.5:1}}
           onClick={()=>setView("kid")}>はじめる！</button>
         <div style={{height:12}}/>
-        <button onClick={()=>setView("teacher")} style={{background:"#fff0e0",color:"#cc6a2c",fontWeight:700,fontSize:15,borderRadius:16,padding:12,width:"100%"}}>👩‍🏫 先生モード</button>
+        <button onClick={()=>setView("auth")}
+          style={{background:"#fff0e0",color:"#cc6a2c",fontWeight:700,fontSize:15,borderRadius:16,padding:12,width:"100%"}}>
+          👩‍🏫 先生モード
+        </button>
       </div>
     </div>
   );
@@ -547,7 +635,17 @@ function App(){
     </div>
   );
 
-  // 先生モード
+  if(view==="auth") return (
+    <div>
+      <button onClick={()=>setView("home")} style={{background:"none",color:"#cc6a2c",fontWeight:700,marginBottom:10}}>← もどる</button>
+      <AuthGate
+        classId={classId}
+        onAuth={{ savedHash, setSavedHash, onSuccess:()=>setView("teacher") }}
+      />
+    </div>
+  );
+
+  // 先生モード（認証済み）
   return (
     <div>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
@@ -555,13 +653,59 @@ function App(){
         <span className="pill">👩‍🏫 {classLabel}</span>
       </div>
       <div style={{display:"flex",gap:6,marginBottom:14,overflowX:"auto"}}>
-        {[["roster","👥 名簿"],["pool","📚 プール"],["dash","📊 ダッシュ"]].map(([k,l])=>(
+        {[["roster","👥 名簿"],["pool","📚 プール"],["dash","📊 ダッシュ"],["pw","🔑 PW"]].map(([k,l])=>(
           <button key={k} className={`tab ${tab===k?"active":""}`} style={{whiteSpace:"nowrap"}} onClick={()=>setTab(k)}>{l}</button>
         ))}
       </div>
       {tab==="roster" && <RosterEditor students={students} setStudents={setStudents}/>}
       {tab==="pool"   && <PoolSetup pool={pool} setPool={setPool}/>}
       {tab==="dash"   && <Dashboard records={records} students={students}/>}
+      {tab==="pw"     && <ChangePassword savedHash={savedHash} setSavedHash={setSavedHash} classId={classId}/>}
+    </div>
+  );
+}
+
+/* ---- パスワード変更（先生モード内） ---- */
+function ChangePassword({ savedHash, setSavedHash, classId }){
+  const hash=(s)=> s.split("").reduce((a,c)=>(a*31+c.charCodeAt(0))>>>0,0).toString(36);
+  const [cur, setCur] = useState("");
+  const [next1, setNext1] = useState("");
+  const [next2, setNext2] = useState("");
+  const [msg, setMsg] = useState("");
+  const [ok, setOk] = useState(false);
+
+  const submit=()=>{
+    if(savedHash && hash(cur)!==savedHash){ setMsg("現在のパスワードが違います"); return; }
+    if(next1.length<4){ setMsg("新しいパスワードは4文字以上"); return; }
+    if(next1!==next2){ setMsg("新しいパスワードが一致しません"); return; }
+    setSavedHash(hash(next1));
+    // ▼本番: localStorage.setItem(`asa_pw_${classId}`, hash(next1));
+    setOk(true); setMsg(""); setCur(""); setNext1(""); setNext2("");
+  };
+
+  return (
+    <div className="card">
+      <h3 style={{marginBottom:14}}>🔑 パスワード変更</h3>
+      {savedHash && (
+        <div style={{marginBottom:12}}>
+          <p style={{fontSize:13,color:"#999",marginBottom:6}}>現在のパスワード</p>
+          <input type="password" className="answer-in" style={{fontSize:20}}
+            value={cur} onChange={e=>{setCur(e.target.value);setMsg("");setOk(false);}} placeholder="現在のパスワード"/>
+        </div>
+      )}
+      <div style={{marginBottom:12}}>
+        <p style={{fontSize:13,color:"#999",marginBottom:6}}>新しいパスワード（4文字以上）</p>
+        <input type="password" className="answer-in" style={{fontSize:20}}
+          value={next1} onChange={e=>{setNext1(e.target.value);setMsg("");setOk(false);}} placeholder="新しいパスワード"/>
+      </div>
+      <div style={{marginBottom:14}}>
+        <p style={{fontSize:13,color:"#999",marginBottom:6}}>確認</p>
+        <input type="password" className="answer-in" style={{fontSize:20}}
+          value={next2} onChange={e=>{setNext2(e.target.value);setMsg("");setOk(false);}} placeholder="もう一度"/>
+      </div>
+      {msg && <p style={{color:"#e85a5a",fontWeight:700,fontSize:14,marginBottom:8}}>{msg}</p>}
+      {ok  && <p style={{color:"#3ba85f",fontWeight:700,fontSize:14,marginBottom:8}}>✅ パスワードを変更しました</p>}
+      <button className="btn-main" style={{fontSize:17}} onClick={submit}>変更する</button>
     </div>
   );
 }
