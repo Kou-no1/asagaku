@@ -555,9 +555,13 @@ function pickToday(pool, date){
     calc = { id:`${key}-${date}`, mode:"calc", unit:key, q:made.q, a:String(made.a), type:"int", choices:null };
   }
 
-  // 漢字問題（kanjiItems から seed+7 で選ぶ）
+  // 漢字問題（登録済みの中から「出題単元」に絞って seed+7 で選ぶ）
   let kanji = null;
-  const kItems = pool.kanjiItems||[];
+  const allKItems = pool.kanjiItems||[];
+  const activeUnits = pool.kanjiActiveUnits||[];
+  const kItems = activeUnits.length>0
+    ? allKItems.filter(x=>activeUnits.includes(x.unit))
+    : allKItems; // 出題単元未設定なら全登録漢字から
   if(kItems.length>0){
     const item = kItems[(seed+7) % kItems.length];
     kanji = buildKanjiQuestion(item, seed+7, item.grade);
@@ -896,20 +900,45 @@ function PoolSetup({ pool, setPool }){
             /* 単元一覧 */
             <>
               <p style={{fontSize:12,color:"#bbb",marginBottom:8}}>
-                単元をタップして、学習した漢字をチェックしてください
+                ✏️ 単元名をタップ → 学習済み漢字をチェック登録<br/>
+                📢 右の「出題」ボタン → 朝学習で出題する単元をON/OFF
               </p>
               <div style={{display:"flex",flexDirection:"column",gap:6}}>
                 {(MITSUMURA_UNITS[selGrade]||[]).map(u=>{
                   const cnt=unitKanjiCount(u);
+                  const activeUnits=pool.kanjiActiveUnits||[];
+                  const isActive=activeUnits.includes(u);
+                  const toggleActive=(e)=>{
+                    e.stopPropagation();
+                    if(cnt===0) return; // 漢字未登録は出題不可
+                    setPool(p=>{
+                      const au=p.kanjiActiveUnits||[];
+                      return {...p, kanjiActiveUnits:
+                        au.includes(u)?au.filter(x=>x!==u):[...au,u]};
+                    });
+                  };
                   return (
-                    <button key={u} onClick={()=>setSelUnit(u)}
-                      style={{padding:"10px 14px",borderRadius:12,fontWeight:700,fontSize:14,
-                        textAlign:"left",display:"flex",justifyContent:"space-between",alignItems:"center",
-                        background:cnt>0?"#fff8f0":"#fff0e0",border:`2px solid ${cnt>0?"#ff8a5c":"#ffd6c0"}`,
-                        color:"#5a4a42"}}>
-                      <span>{u}</span>
-                      {cnt>0 && <span style={{fontSize:12,color:"#ff8a5c",fontWeight:800}}>{cnt}字 ✓</span>}
-                    </button>
+                    <div key={u} style={{display:"flex",gap:6,alignItems:"center"}}>
+                      <button onClick={()=>cnt>=0&&setSelUnit(u)}
+                        style={{flex:1,padding:"10px 14px",borderRadius:12,fontWeight:700,fontSize:14,
+                          textAlign:"left",display:"flex",justifyContent:"space-between",alignItems:"center",
+                          background:cnt>0?"#fff8f0":"#fff0e0",
+                          border:`2px solid ${isActive?"#ff8a5c":cnt>0?"#ffa07a":"#ffd6c0"}`,
+                          color:"#5a4a42",cursor:"pointer"}}>
+                        <span>{u}</span>
+                        {cnt>0 && <span style={{fontSize:12,color:"#ff8a5c",fontWeight:800}}>{cnt}字</span>}
+                      </button>
+                      <button onClick={toggleActive}
+                        title={cnt===0?"先に漢字を登録してください":"出題ON/OFF"}
+                        style={{padding:"10px 12px",borderRadius:12,fontWeight:800,fontSize:13,
+                          whiteSpace:"nowrap",flexShrink:0,
+                          background:isActive?"#4ec27a":cnt>0?"#fff0e0":"#f0f0f0",
+                          color:isActive?"#fff":cnt>0?"#cc6a2c":"#bbb",
+                          border:`2px solid ${isActive?"#4ec27a":cnt>0?"#ffd6c0":"#e0e0e0"}`,
+                          cursor:cnt===0?"not-allowed":"pointer"}}>
+                        {isActive?"出題中":"出題"}
+                      </button>
+                    </div>
                   );
                 })}
               </div>
@@ -960,8 +989,8 @@ function PoolSetup({ pool, setPool }){
         </>
       )}
       <div style={{marginTop:14,fontSize:13,color:"#aa9",display:"flex",gap:16,flexWrap:"wrap"}}>
-        <span>🔢 計算: {calcUnits.length}単元</span>
-        <span>📖 漢字: {kanjiItems.length}字登録</span>
+        <span>🔢 計算: {calcUnits.length}単元出題中</span>
+        <span>📖 漢字: {kanjiItems.length}字登録 / {(pool.kanjiActiveUnits||[]).length}単元出題中</span>
       </div>
     </div>
   );
@@ -1194,7 +1223,7 @@ function App(){
   const [students, setStudents] = useState(DEFAULT_STUDENTS);
   const [student, setStudent] = useState(null);
   const [records, setRecords] = useState([]);
-  const [pool, setPool] = useState({ calcUnits:["c2-かけ算","c3-わり算"], kanjiItems:[] });
+  const [pool, setPool] = useState({ calcUnits:["c2-かけ算","c3-わり算"], kanjiItems:[], kanjiActiveUnits:[] });
 
   // パスワードハッシュ（本番は localStorage.getItem(PASS_KEY) で初期化）
   const [savedHash, setSavedHash] = useState("");
