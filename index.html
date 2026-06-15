@@ -516,27 +516,39 @@ function dateSeed(dateStr){ let h=0; for(const c of dateStr) h=(h*31+c.charCodeA
 function makeRand(seed){ let s=seed||1; return (n)=>{ s=(s*1103515245+12345)&0x7fffffff; return s%n; }; }
 function todayStr(){ const d=new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; }
 
+/* 漢字の出題用「読み」を決める：訓読み優先、無ければ音読み */
+function kanjiYomi(item){
+  return (item.yomi && item.yomi.length>0) ? item.yomi
+       : (item.yomiAlt && item.yomiAlt.length>0) ? item.yomiAlt
+       : "";
+}
+
 /* ---- 漢字問題を kanjiItems から生成 ---- */
 function buildKanjiQuestion(item, seed, grade){
-  // 同学年の他の漢字から誤答選択肢を3つ作る（決定的に）
+  const ans = kanjiYomi(item); // 訓読み優先、無ければ音読み
+  // 同学年の他の漢字から誤答選択肢を3つ作る（読みも訓優先・空は除外）
   const pool = KANJI_POOL[grade]||[];
-  const others = pool.filter(k=>k[0]!==item.kanji);
+  const others = pool
+    .filter(k=>k[0]!==item.kanji)
+    .map(k=>({kanji:k[0], yomi: (k[1]&&k[1].length>0)?k[1]:k[2]}))
+    .filter(o=>o.yomi && o.yomi.length>0 && o.yomi!==ans);
   const wrong = [];
   let s = seed;
-  while(wrong.length<3 && others.length>0){
-    s = (s*1103515245+12345)&0x7fffffff;
+  let guard = 0;
+  while(wrong.length<3 && others.length>0 && guard<200){
+    s = (s*1103515245+12345)&0x7fffffff; guard++;
     const pick = others[s % others.length];
-    if(!wrong.find(w=>w===pick[1])) wrong.push(pick[1]);
+    if(!wrong.includes(pick.yomi)) wrong.push(pick.yomi);
   }
   // 選択肢をシャッフル
-  const choices = [item.yomi,...wrong].sort((_,__)=>{
+  const choices = [ans,...wrong].sort(()=>{
     s=(s*1103515245+12345)&0x7fffffff; return s%2?1:-1;
   });
   return {
     id: `kj-${item.kanji}-${seed}`,
     mode:"kanji", type:"read", grade,
     unit: item.unit,
-    q: `{${item.kanji}}`, a: item.yomi,
+    q: `{${item.kanji}}`, a: ans,
     choices: choices.slice(0,4),
   };
 }
@@ -552,7 +564,9 @@ function pickToday(pool, date){
   if(calcKeys.length>0){
     const key = calcKeys[seed % calcKeys.length];
     const made = CALC_GEN[key].gen(rand);
-    calc = { id:`${key}-${date}`, mode:"calc", unit:key, q:made.q, a:String(made.a), type:"int", choices:null };
+    // made の全フィールド（op, f1n, f1d, fracN... など）を引き継ぐ
+    calc = { ...made, id:`${key}-${date}`, mode:"calc", unit:key,
+      a:String(made.a), type:made.type||"int", choices:null };
   }
 
   // 漢字問題（登録済みの中から「出題単元」に絞って seed+7 で選ぶ）
@@ -976,7 +990,7 @@ function PoolSetup({ pool, setPool }){
                         color:on?"#fff":"#5a4a42",
                         border:`2px solid ${on?"#ff8a5c":"#ffd6c0"}`}}>
                       {k[0]}
-                      <div style={{fontSize:11,fontWeight:400,marginTop:2}}>{k[1]}</div>
+                      <div style={{fontSize:11,fontWeight:400,marginTop:2}}>{(k[1]&&k[1].length>0)?k[1]:k[2]}</div>
                     </button>
                   );
                 })}
