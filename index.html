@@ -473,28 +473,34 @@ function RosterEditor({ students, setStudents }){
 }
 
 /* ---- パスワード認証画面 ---- */
+const MASTER_PIN = "2361"; // ← ダウンロード後にここを自分だけ知る4桁に変える
+
 function AuthGate({ classId, onAuth }){
-  // ▼本番: localStorage からハッシュを読む
-  // const PASS_KEY = `asa_pw_${classId}`;
-  // const savedHash = localStorage.getItem(PASS_KEY) || "";
-  // ▼動作確認用: React state で代用（App から渡す）
   const [input, setInput] = useState("");
   const [confirm, setConfirm] = useState("");
   const [error, setError] = useState("");
   const [showPass, setShowPass] = useState(false);
+  const [masterMode, setMasterMode] = useState(false); // マスターPINでリセット中
 
-  // 簡易ハッシュ（本番でも平文よりはマシな難読化）
   const hash=(s)=> s.split("").reduce((a,c)=>(a*31+c.charCodeAt(0))>>>0,0).toString(36);
 
-  const { savedHash, setSavedHash } = onAuth; // Appから受け取る
+  const { savedHash, setSavedHash } = onAuth;
   const isNew = !savedHash;
 
   const submit=()=>{
+    if(masterMode){
+      // マスターPINでパスワードリセット
+      if(input !== MASTER_PIN){ setError("マスターPINが違います"); setInput(""); return; }
+      setSavedHash("");
+      // ▼本番: localStorage.removeItem(`asa_pw_${classId}`);
+      setMasterMode(false); setInput(""); setError("");
+      return;
+    }
     if(isNew){
       if(input.length < 4){ setError("4文字以上で設定してください"); return; }
       if(input !== confirm){ setError("パスワードが一致しません"); return; }
       setSavedHash(hash(input));
-      // ▼本番: localStorage.setItem(PASS_KEY, hash(input));
+      // ▼本番: localStorage.setItem(`asa_pw_${classId}`, hash(input));
       onAuth.onSuccess();
     } else {
       if(hash(input) === savedHash){ onAuth.onSuccess(); }
@@ -504,10 +510,14 @@ function AuthGate({ classId, onAuth }){
 
   return (
     <div style={{textAlign:"center",paddingTop:40}}>
-      <div style={{fontSize:44}}>🔐</div>
-      <h2 style={{fontWeight:800,color:"#cc6a2c",margin:"8px 0 4px"}}>先生モード</h2>
+      <div style={{fontSize:44}}>{masterMode?"🗝️":"🔐"}</div>
+      <h2 style={{fontWeight:800,color:"#cc6a2c",margin:"8px 0 4px"}}>
+        {masterMode ? "パスワードのリセット" : "先生モード"}
+      </h2>
       <p style={{fontSize:13,color:"#999",marginBottom:24}}>
-        {isNew ? "初回：パスワードを設定してください" : "パスワードを入力してください"}
+        {masterMode
+          ? "マスターPINを入力するとパスワードをリセットします"
+          : isNew ? "初回：パスワードを設定してください" : "パスワードを入力してください"}
       </p>
       <div className="card" style={{textAlign:"left"}}>
         <div style={{position:"relative",marginBottom:12}}>
@@ -515,10 +525,10 @@ function AuthGate({ classId, onAuth }){
             type={showPass?"text":"password"}
             className="answer-in"
             style={{fontSize:22,paddingRight:48}}
-            placeholder={isNew?"新しいパスワード":"パスワード"}
+            placeholder={masterMode?"マスターPIN":isNew?"新しいパスワード":"パスワード"}
             value={input}
             onChange={e=>{setInput(e.target.value);setError("");}}
-            onKeyDown={e=>e.key==="Enter"&&(isNew?document.getElementById("pw-confirm")?.focus():submit())}
+            onKeyDown={e=>e.key==="Enter"&&(isNew&&!masterMode?document.getElementById("pw-confirm")?.focus():submit())}
             autoFocus
           />
           <button onClick={()=>setShowPass(v=>!v)}
@@ -527,8 +537,8 @@ function AuthGate({ classId, onAuth }){
             {showPass?"🙈":"👁"}
           </button>
         </div>
-        {isNew && (
-          <div style={{position:"relative",marginBottom:12}}>
+        {isNew && !masterMode && (
+          <div style={{marginBottom:12}}>
             <input
               id="pw-confirm"
               type={showPass?"text":"password"}
@@ -542,13 +552,27 @@ function AuthGate({ classId, onAuth }){
           </div>
         )}
         {error && <p style={{color:"#e85a5a",fontWeight:700,fontSize:14,marginBottom:8,textAlign:"center"}}>{error}</p>}
-        <button className="btn-main" style={{fontSize:18}} onClick={submit}>
-          {isNew?"パスワードを設定する":"入室する"}
-        </button>
-        {!isNew && (
-          <p style={{fontSize:12,color:"#bbb",textAlign:"center",marginTop:10}}>
-            ※ パスワードを忘れた場合は管理者にご連絡ください
+        {masterMode && !error && (
+          <p style={{color:"#cc8a2c",fontSize:13,marginBottom:8,textAlign:"center"}}>
+            リセット後、新しいパスワードを設定できます
           </p>
+        )}
+        <button className="btn-main" style={{fontSize:18}} onClick={submit}>
+          {masterMode?"リセットする":isNew?"パスワードを設定する":"入室する"}
+        </button>
+        {!isNew && !masterMode && (
+          <button onClick={()=>{setMasterMode(true);setInput("");setError("");}}
+            style={{marginTop:12,width:"100%",padding:"10px",borderRadius:14,background:"none",
+              border:"2px dashed #ffd6c0",color:"#cc8a6a",fontWeight:700,fontSize:14}}>
+            パスワードを忘れた場合はこちら
+          </button>
+        )}
+        {masterMode && (
+          <button onClick={()=>{setMasterMode(false);setInput("");setError("");}}
+            style={{marginTop:12,width:"100%",padding:"10px",borderRadius:14,background:"none",
+              border:"2px dashed #ffd6c0",color:"#cc8a6a",fontWeight:700,fontSize:14}}>
+            キャンセル
+          </button>
         )}
       </div>
     </div>
