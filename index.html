@@ -117,21 +117,28 @@ function dateSeed(dateStr){ let h=0; for(const c of dateStr) h=(h*31+c.charCodeA
 function makeRand(seed){ let s=seed||1; return (n)=>{ s=(s*1103515245+12345)&0x7fffffff; return s%n; }; }
 function todayStr(){ const d=new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; }
 
-/* プールから「今日の問題」を決定的に取り出す */
+/* プールから「今日の2問」を決定的に取り出す（計算1＋漢字1） */
 function pickToday(pool, date){
   const seed = dateSeed(date);
   const rand = makeRand(seed);
-  if(pool.mode==="kanji"){
-    const items = KANJI.filter(k=> pool.units.includes(k.unit));
-    if(items.length===0) return null;
-    return items[seed % items.length];
-  } else {
-    const keys = pool.units.filter(u=>CALC_GEN[u]);
-    if(keys.length===0) return null;
-    const key = keys[seed % keys.length];
+
+  // 計算問題
+  let calc = null;
+  const calcKeys = (pool.calcUnits||[]).filter(u=>CALC_GEN[u]);
+  if(calcKeys.length>0){
+    const key = calcKeys[seed % calcKeys.length];
     const made = CALC_GEN[key].gen(rand);
-    return { id:`${key}-${date}`, mode:"calc", unit:key, q:made.q, a:String(made.a), choices:null };
+    calc = { id:`${key}-${date}`, mode:"calc", unit:key, q:made.q, a:String(made.a), choices:null };
   }
+
+  // 漢字問題（seed+7 で別の問題にする）
+  let kanji = null;
+  const kanjiItems = KANJI.filter(k=>(pool.kanjiUnits||[]).includes(k.unit));
+  if(kanjiItems.length>0){
+    kanji = kanjiItems[(seed+7) % kanjiItems.length];
+  }
+
+  return { calc, kanji };
 }
 
 /* =========================================================================
@@ -169,41 +176,42 @@ function Confetti(){
   ));
 }
 
-/* ---- 子どもモード：今日の一問 ---- */
-function KidQuiz({ pool, student, onRecord }){
-  const date = todayStr();
-  const q = useMemo(()=>pickToday(pool, date),[pool, date]);
+/* ---- 1問コンポーネント（即答ボタン付き） ---- */
+function OneQuestion({ q, onFinish, allDone }){
   const [input, setInput] = useState("");
   const [picked, setPicked] = useState(null);
-  const [done, setDone] = useState(false);
+  const [state, setState] = useState("idle"); // idle | answered | revealed
   const [correct, setCorrect] = useState(false);
+  const [showAns, setShowAns] = useState(false);
 
-  if(!q) return <div className="card">この プールには もんだいが ありません。先生に つたえてね。</div>;
+  if(!q) return null;
 
-  const finish=(isRight)=>{
-    setCorrect(isRight); setDone(true);
-    onRecord({ date, studentId:student, questionId:q.id, unit:q.unit, mode:q.mode, correct:isRight });
+  const finish=(isRight, revealed=false)=>{
+    setCorrect(isRight); setState(revealed?"revealed":"answered");
+    onFinish({ questionId:q.id, unit:q.unit, mode:q.mode, correct:isRight });
   };
-  const submitInput=()=> finish(input.trim()===q.a);
-  const submitChoice=(c)=>{ setPicked(c); setTimeout(()=>finish(c===q.a),500); };
+  const submitInput=()=>{ if(!input.trim()) return; finish(input.trim()===String(q.a)); };
+  const submitChoice=(c)=>{ if(state!=="idle") return; setPicked(c); setTimeout(()=>finish(c===q.a),400); };
+  const reveal=()=>{ setState("revealed"); setShowAns(true); onFinish({ questionId:q.id, unit:q.unit, mode:q.mode, correct:false, skipped:true }); };
 
+  const done = state!=="idle";
   const display = q.q.replace(/\{(.+?)\}/g, "（$1）");
+  const label = q.mode==="kanji"?"📖 かんじ":"🔢 けいさん";
 
   return (
-    <div className="card pop">
-      {done && correct && <Confetti/>}
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
-        <span className="pill">{q.mode==="kanji"?"📖 かんじ":"🔢 けいさん"}</span>
-        <span style={{fontSize:13,color:"#aa9"}}>{date}</span>
+    <div className="card" style={{marginBottom:14}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+        <span className="pill">{label}</span>
+        {done && <span style={{fontSize:24}}>{correct?"🟩":"🟨"}</span>}
+      </div>
+      <div style={{fontSize:36,fontWeight:800,textAlign:"center",margin:"18px 0",color:"#5a4a42"}}>
+        {display}{q.mode==="calc" && " = ?"}
       </div>
 
       {!done ? (
         <>
-          <div style={{fontSize:38,fontWeight:800,textAlign:"center",margin:"28px 0",color:"#5a4a42"}}>
-            {display}{q.mode==="calc" && " = ?"}
-          </div>
           {q.choices ? (
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
               {q.choices.map(c=>(
                 <button key={c} className={`btn-choice ${picked===c?(c===q.a?"correct":"wrong"):""}`}
                   disabled={picked!==null} onClick={()=>submitChoice(c)}>{c}</button>
@@ -214,18 +222,71 @@ function KidQuiz({ pool, student, onRecord }){
               <input className="answer-in" inputMode={q.mode==="calc"?"decimal":"text"}
                 value={input} onChange={e=>setInput(e.target.value)}
                 onKeyDown={e=>e.key==="Enter"&&submitInput()} placeholder="こたえ" autoFocus/>
-              <div style={{height:14}}/>
-              <button className="btn-main" onClick={submitInput}>こたえる！</button>
+              <div style={{height:10}}/>
+              <button className="btn-main" style={{fontSize:18,padding:14}} onClick={submitInput}>こたえる！</button>
             </>
           )}
+          <button onClick={reveal}
+            style={{marginTop:10,width:"100%",padding:"10px",borderRadius:14,background:"none",
+              border:"2px dashed #ffd6c0",color:"#cc8a6a",fontWeight:700,fontSize:14}}>
+            こたえをみる
+          </button>
         </>
       ) : (
-        <div style={{textAlign:"center"}} className="pop">
-          <div style={{fontSize:72,margin:"10px 0"}}>{correct?"🟩":"🟨"}</div>
-          <div style={{fontSize:26,fontWeight:800,color:correct?"#3ba85f":"#cc8a2c"}}>
-            {correct?"せいかい！すごい！":"おしい！またあした"}
+        <div style={{textAlign:"center",padding:"8px 0"}}>
+          {state==="revealed"
+            ? <div style={{fontSize:16,color:"#cc8a2c"}}>こたえ：<b style={{fontSize:22}}>{q.a}</b></div>
+            : <div style={{fontSize:20,fontWeight:800,color:correct?"#3ba85f":"#cc8a2c"}}>
+                {correct?"せいかい！":"おしい！"}
+                {!correct && <div style={{fontSize:15,marginTop:4}}>こたえ：<b>{q.a}</b></div>}
+              </div>
+          }
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ---- 子どもモード：今日の2問 ---- */
+function KidQuiz({ pool, student, onRecord }){
+  const date = todayStr();
+  const { calc, kanji } = useMemo(()=>pickToday(pool, date),[pool, date]);
+  const [results, setResults] = useState({});
+  const [celebrated, setCelebrated] = useState(false);
+
+  const questions = [calc, kanji].filter(Boolean);
+  const doneCount = Object.keys(results).length;
+  const allDone = doneCount >= questions.length && questions.length > 0;
+  const allCorrect = allDone && Object.values(results).every(r=>r.correct && !r.skipped);
+
+  if(!celebrated && allDone && allCorrect){ setCelebrated(true); }
+
+  const handleFinish=(res)=>{
+    setResults(prev=>{
+      if(prev[res.questionId]) return prev;
+      const next = {...prev, [res.questionId]: res};
+      onRecord({ date, studentId:student, questionId:res.questionId, unit:res.unit, mode:res.mode, correct:res.correct });
+      return next;
+    });
+  };
+
+  if(questions.length===0) return <div className="card">プールに もんだいが ありません。先生に つたえてね。</div>;
+
+  return (
+    <div>
+      {celebrated && <Confetti/>}
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+        <span style={{fontSize:13,color:"#aa9"}}>{date}</span>
+        <span style={{fontSize:13,fontWeight:700,color:"#cc6a2c"}}>{doneCount}/{questions.length} もん</span>
+      </div>
+      {calc  && <OneQuestion q={calc}  onFinish={handleFinish} allDone={allDone}/>}
+      {kanji && <OneQuestion q={kanji} onFinish={handleFinish} allDone={allDone}/>}
+      {allDone && (
+        <div className="card pop" style={{textAlign:"center",marginTop:4}}>
+          <div style={{fontSize:48}}>{allCorrect?"🎉":"👍"}</div>
+          <div style={{fontWeight:800,fontSize:22,color:allCorrect?"#3ba85f":"#cc8a2c"}}>
+            {allCorrect?"ぜんもんせいかい！":"よくがんばりました！"}
           </div>
-          {!correct && <div style={{marginTop:10,fontSize:18,color:"#888"}}>こたえ：<b>{q.a}</b></div>}
         </div>
       )}
     </div>
@@ -252,37 +313,62 @@ function Streak({ records, student }){
   );
 }
 
-/* ---- 先生：プール設定 ---- */
+/* ---- 先生：プール設定（計算＋漢字を同時設定） ---- */
 function PoolSetup({ pool, setPool }){
+  const [tab, setTab] = useState("calc");
   const allKanjiUnits = [...new Set(KANJI.map(k=>k.unit))];
   const allCalcUnits = Object.keys(CALC_GEN);
-  const units = pool.mode==="kanji"?allKanjiUnits:allCalcUnits;
-  const grades = pool.mode==="kanji"
-    ? Object.fromEntries(KANJI.map(k=>[k.unit,k.grade]))
-    : Object.fromEntries(Object.entries(CALC_GEN).map(([k,v])=>[k,v.grade]));
+  const kanjiGrades = Object.fromEntries(KANJI.map(k=>[k.unit,k.grade]));
+  const calcGrades = Object.fromEntries(Object.entries(CALC_GEN).map(([k,v])=>[k,v.grade]));
 
-  const toggle=(u)=> setPool(p=>({...p, units: p.units.includes(u)? p.units.filter(x=>x!==u):[...p.units,u]}));
+  const toggleCalc=(u)=> setPool(p=>({...p, calcUnits: (p.calcUnits||[]).includes(u)? (p.calcUnits||[]).filter(x=>x!==u):[...(p.calcUnits||[]),u]}));
+  const toggleKanji=(u)=> setPool(p=>({...p, kanjiUnits: (p.kanjiUnits||[]).includes(u)? (p.kanjiUnits||[]).filter(x=>x!==u):[...(p.kanjiUnits||[]),u]}));
+
+  const calcUnits = pool.calcUnits||[];
+  const kanjiUnits = pool.kanjiUnits||[];
 
   return (
     <div className="card">
       <h3 style={{marginBottom:14}}>出題プールの設定</h3>
-      <div style={{display:"flex",gap:8,marginBottom:16}}>
-        <button className={`tab ${pool.mode==="kanji"?"active":""}`} onClick={()=>setPool(p=>({...p,mode:"kanji",units:[]}))}>📖 漢字</button>
-        <button className={`tab ${pool.mode==="calc"?"active":""}`} onClick={()=>setPool(p=>({...p,mode:"calc",units:[]}))}>🔢 計算</button>
+      <p style={{fontSize:13,color:"#999",marginBottom:12}}>計算・漢字それぞれ単元を選ぶと、毎日1問ずつ出題されます</p>
+      <div style={{display:"flex",gap:8,marginBottom:14}}>
+        <button className={`tab ${tab==="calc"?"active":""}`} onClick={()=>setTab("calc")}>
+          🔢 計算 {calcUnits.length>0&&<span style={{fontSize:11}}>({calcUnits.length})</span>}
+        </button>
+        <button className={`tab ${tab==="kanji"?"active":""}`} onClick={()=>setTab("kanji")}>
+          📖 漢字 {kanjiUnits.length>0&&<span style={{fontSize:11}}>({kanjiUnits.length})</span>}
+        </button>
       </div>
-      <p style={{fontSize:13,color:"#999",marginBottom:10}}>学年×単元を選択（年度初めは前学年も選べます）</p>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-        {units.map(u=>(
-          <button key={u} onClick={()=>toggle(u)}
-            style={{padding:"10px",borderRadius:12,fontWeight:700,fontSize:13,textAlign:"left",
-              background: pool.units.includes(u)?"#ff8a5c":"#fff0e0",
-              color: pool.units.includes(u)?"#fff":"#cc6a2c"}}>
-            <span style={{opacity:.7,fontSize:11}}>{grades[u]}年</span><br/>
-            {pool.mode==="calc"?CALC_GEN[u].label:u.replace(/^k\d-/,"")}
-          </button>
-        ))}
+      <p style={{fontSize:12,color:"#bbb",marginBottom:8}}>学年×単元を選択（年度初めは前学年も選べます）</p>
+      {tab==="calc" ? (
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+          {allCalcUnits.map(u=>(
+            <button key={u} onClick={()=>toggleCalc(u)}
+              style={{padding:"10px",borderRadius:12,fontWeight:700,fontSize:13,textAlign:"left",
+                background: calcUnits.includes(u)?"#ff8a5c":"#fff0e0",
+                color: calcUnits.includes(u)?"#fff":"#cc6a2c"}}>
+              <span style={{opacity:.7,fontSize:11}}>{calcGrades[u]}年</span><br/>
+              {CALC_GEN[u].label}
+            </button>
+          ))}
+        </div>
+      ) : (
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+          {allKanjiUnits.map(u=>(
+            <button key={u} onClick={()=>toggleKanji(u)}
+              style={{padding:"10px",borderRadius:12,fontWeight:700,fontSize:13,textAlign:"left",
+                background: kanjiUnits.includes(u)?"#ff8a5c":"#fff0e0",
+                color: kanjiUnits.includes(u)?"#fff":"#cc6a2c"}}>
+              <span style={{opacity:.7,fontSize:11}}>{kanjiGrades[u]}年</span><br/>
+              {u.replace(/^k\d-/,"")}
+            </button>
+          ))}
+        </div>
+      )}
+      <div style={{marginTop:14,fontSize:13,color:"#aa9",display:"flex",gap:16}}>
+        <span>🔢 計算: {calcUnits.length}単元</span>
+        <span>📖 漢字: {kanjiUnits.length}単元</span>
       </div>
-      <p style={{marginTop:14,fontSize:13,color:"#aa9"}}>選択中: {pool.units.length}単元</p>
     </div>
   );
 }
@@ -338,35 +424,115 @@ function Dashboard({ records, students }){
   );
 }
 
+/* ---- 先生：名簿管理 ---- */
+function RosterEditor({ students, setStudents }){
+  const [text, setText] = useState(students.join("\n"));
+  const [saved, setSaved] = useState(false);
+
+  const save=()=>{
+    const list = text.split("\n").map(s=>s.trim()).filter(Boolean);
+    if(list.length===0) return;
+    setStudents(list);
+    setSaved(true);
+    setTimeout(()=>setSaved(false), 2000);
+    // ▼本番: const d=loadStore(); d.students=list; saveStore(d);
+  };
+
+  return (
+    <div className="card">
+      <h3 style={{marginBottom:6}}>名簿の編集</h3>
+      <p style={{fontSize:13,color:"#999",marginBottom:12}}>
+        名前を1行1人で貼り付け。Excelや名簿からコピペOK。
+      </p>
+      <textarea
+        value={text}
+        onChange={e=>{setText(e.target.value); setSaved(false);}}
+        style={{
+          font:"inherit", fontSize:16, width:"100%", minHeight:200,
+          border:"2px solid #ffd6c0", borderRadius:16, padding:14,
+          resize:"vertical", outline:"none", lineHeight:1.8
+        }}
+        placeholder={"山田 太郎\n鈴木 花子\n佐藤 次郎"}
+      />
+      <div style={{marginTop:10,display:"flex",alignItems:"center",gap:12}}>
+        <button className="btn-main" style={{fontSize:16,padding:"12px"}} onClick={save}>
+          {saved?"✅ 保存しました！":"名簿を反映する"}
+        </button>
+        <span style={{fontSize:13,color:"#aaa"}}>{text.split("\n").filter(s=>s.trim()).length}人</span>
+      </div>
+      {students.length>0 && (
+        <div style={{marginTop:14}}>
+          <p style={{fontSize:13,color:"#cc6a2c",fontWeight:700,marginBottom:6}}>現在の名簿（{students.length}人）</p>
+          <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+            {students.map(s=><span key={s} className="pill">{s}</span>)}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ---- ルート ---- */
 function App(){
-  const STUDENTS = ["あおい","はると","ゆい","そうた","めい","りく"];
-  const [view, setView] = useState("home"); // home | kid | teacher
-  const [student, setStudent] = useState(STUDENTS[0]);
-  const [tab, setTab] = useState("pool"); // pool | dash
-  const [records, setRecords] = useState([]); // 本番は loadStore().records
-  const [pool, setPool] = useState({ mode:"calc", units:["c2-かけ算","c3-わり算"] });
+  // URLパラメータからクラスIDを取得（例: ?class=3-1）
+  const classId = useMemo(()=>{
+    const p = new URLSearchParams(window.location.search).get("class");
+    return p || "default";
+  },[]);
+
+  // ▼本番: ストアキーにclassIdを含める
+  // const STORE_KEY = `asa_gakushu_${classId}_v1`;
+  // function loadStore(){ try{ return JSON.parse(localStorage.getItem(STORE_KEY))||{}; }catch(e){ return {}; } }
+  // function saveStore(d){ localStorage.setItem(STORE_KEY, JSON.stringify(d)); }
+
+  const DEFAULT_STUDENTS = ["（名前）さん１","（名前）さん２","（名前）さん３"];
+
+  const [view, setView] = useState("home");
+  const [tab, setTab] = useState("roster"); // roster | pool | dash  ← 初回は名簿から
+  const [students, setStudents] = useState(DEFAULT_STUDENTS);
+  // ▼本番: useState(loadStore().students || DEFAULT_STUDENTS)
+  const [student, setStudent] = useState(null);
+  const [records, setRecords] = useState([]);
+  const [pool, setPool] = useState({ calcUnits:["c2-かけ算","c3-わり算"], kanjiUnits:["k2-動き","k3-動き"] });
+
+  // 選択中の生徒（初期値: 名簿の先頭）
+  const currentStudent = student || students[0];
 
   const record=(rec)=>{
     setRecords(prev=>{
       if(prev.find(r=>r.date===rec.date && r.studentId===rec.studentId)) return prev;
       const next=[...prev, rec];
-      // ▼本番: const data=loadStore(); data.records=next; saveStore(data); syncToSheet(rec);
+      // ▼本番: const d=loadStore(); d.records=next; saveStore(d);
       return next;
     });
   };
+
+  const classLabel = classId==="default" ? "クラス未設定" : `${classId}`;
 
   if(view==="home") return (
     <div style={{textAlign:"center",paddingTop:40}}>
       <div style={{fontSize:48}}>🌅</div>
       <h1 style={{fontSize:32,fontWeight:800,color:"#ff7a3c",margin:"8px 0 4px"}}>今日の一問</h1>
-      <p style={{color:"#999",marginBottom:30}}>朝学習アプリ</p>
+      <p style={{color:"#999",marginBottom:4}}>朝学習アプリ</p>
+      <p style={{fontSize:13,color:"#cc6a2c",fontWeight:700,marginBottom:24}}>
+        {classLabel==="クラス未設定"
+          ? <span style={{color:"#e85a5a"}}>⚠️ URLに ?class=3-1 を付けてください</span>
+          : `🏫 ${classLabel}`}
+      </p>
       <div className="card">
-        <p style={{fontWeight:700,marginBottom:10,color:"#cc6a2c"}}>だれが やりますか？</p>
-        <select value={student} onChange={e=>setStudent(e.target.value)} style={{width:"100%",marginBottom:16}}>
-          {STUDENTS.map(s=><option key={s}>{s}</option>)}
-        </select>
-        <button className="btn-main" onClick={()=>setView("kid")}>はじめる！</button>
+        {students[0]===DEFAULT_STUDENTS[0]
+          ? <p style={{color:"#e85a5a",fontWeight:700,marginBottom:14}}>⚠️ 先生モードで名簿を登録してください</p>
+          : <>
+              <p style={{fontWeight:700,marginBottom:10,color:"#cc6a2c"}}>だれが やりますか？</p>
+              <select value={currentStudent} onChange={e=>setStudent(e.target.value)} style={{width:"100%",marginBottom:16}}>
+                {students.map(s=><option key={s}>{s}</option>)}
+              </select>
+            </>
+        }
+        <button className="btn-main"
+          disabled={students[0]===DEFAULT_STUDENTS[0]}
+          style={{opacity:students[0]===DEFAULT_STUDENTS[0]?.5:1}}
+          onClick={()=>setView("kid")}>はじめる！</button>
         <div style={{height:12}}/>
         <button onClick={()=>setView("teacher")} style={{background:"#fff0e0",color:"#cc6a2c",fontWeight:700,fontSize:15,borderRadius:16,padding:12,width:"100%"}}>👩‍🏫 先生モード</button>
       </div>
@@ -376,19 +542,26 @@ function App(){
   if(view==="kid") return (
     <div>
       <button onClick={()=>setView("home")} style={{background:"none",color:"#cc6a2c",fontWeight:700,marginBottom:10}}>← もどる</button>
-      <KidQuiz pool={pool} student={student} onRecord={record}/>
-      <Streak records={records} student={student}/>
+      <KidQuiz pool={pool} student={currentStudent} onRecord={record}/>
+      <Streak records={records} student={currentStudent}/>
     </div>
   );
 
+  // 先生モード
   return (
     <div>
-      <button onClick={()=>setView("home")} style={{background:"none",color:"#cc6a2c",fontWeight:700,marginBottom:10}}>← もどる</button>
-      <div style={{display:"flex",gap:8,marginBottom:14}}>
-        <button className={`tab ${tab==="pool"?"active":""}`} onClick={()=>setTab("pool")}>プール設定</button>
-        <button className={`tab ${tab==="dash"?"active":""}`} onClick={()=>setTab("dash")}>ダッシュボード</button>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+        <button onClick={()=>setView("home")} style={{background:"none",color:"#cc6a2c",fontWeight:700}}>← もどる</button>
+        <span className="pill">👩‍🏫 {classLabel}</span>
       </div>
-      {tab==="pool"? <PoolSetup pool={pool} setPool={setPool}/> : <Dashboard records={records} students={STUDENTS}/>}
+      <div style={{display:"flex",gap:6,marginBottom:14,overflowX:"auto"}}>
+        {[["roster","👥 名簿"],["pool","📚 プール"],["dash","📊 ダッシュ"]].map(([k,l])=>(
+          <button key={k} className={`tab ${tab===k?"active":""}`} style={{whiteSpace:"nowrap"}} onClick={()=>setTab(k)}>{l}</button>
+        ))}
+      </div>
+      {tab==="roster" && <RosterEditor students={students} setStudents={setStudents}/>}
+      {tab==="pool"   && <PoolSetup pool={pool} setPool={setPool}/>}
+      {tab==="dash"   && <Dashboard records={records} students={students}/>}
     </div>
   );
 }
