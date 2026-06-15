@@ -101,15 +101,93 @@ const KANJI = [
    計算：単元タグ付きの生成器（add/sub/mul/div/decimal/fraction）
    日付シードから決定的に1問を作る → 全員同じ日は同じ問題（Wordle型）
    ========================================================================= */
+// 分数ユーティリティ
+function gcd(a,b){ return b===0?a:gcd(b,a%b); }
+function fracReduce(n,d){ const g=gcd(Math.abs(n),Math.abs(d)); return [n/g,d/g]; }
+
+/*
+  分数の正誤判定（かけ算・わり算対応版）
+  ルール：
+    - 約分されていない入力は不正解（例: 2/4 は不正解、1/2 が正解）
+    - 整数に約分できる場合は整数のみ正解（例: 4/4 → 1 のみ）
+    - 仮分数・帯分数どちらでも正解（例: 7/4 と 1と3/4 は同値）
+    - 入力形式:
+        整数         : "3"
+        仮分数       : "7/4"
+        帯分数       : "1と3/4" または "1 3/4"
+*/
+function fracEqual(input, ansN, ansD){
+  const s = input.trim();
+
+  // 正答を既約分数に
+  const [an, ad] = fracReduce(ansN, ansD);
+
+  // 整数のみ正解のケース
+  if(ad === 1) return s === String(an);
+
+  // 帯分数パース: "Xと N/D" or "X N/D"
+  const mixedM = s.match(/^(\d+)[とと\s]+(\d+)[\/／](\d+)$/);
+  if(mixedM){
+    const w=parseInt(mixedM[1]), fn=parseInt(mixedM[2]), fd=parseInt(mixedM[3]);
+    if(fd===0) return false;
+    // 帯分数 → 仮分数
+    const iN = w*fd + fn;
+    // 約分チェック（入力の分数部分が既約か）
+    const [rn,rd] = fracReduce(fn, fd);
+    if(rn!==fn || rd!==fd) return false; // 分数部分が約分されていない
+    const [cn,cd] = fracReduce(iN, fd);
+    return cn===an && cd===ad;
+  }
+
+  // 仮分数パース: "N/D"
+  const fracM = s.match(/^(\d+)[\/／](\d+)$/);
+  if(fracM){
+    const fn=parseInt(fracM[1]), fd=parseInt(fracM[2]);
+    if(fd===0) return false;
+    // 約分チェック：入力が既約か
+    const [rn,rd] = fracReduce(fn, fd);
+    if(rn!==fn || rd!==fd) return false; // 約分されていない → 不正解
+    return fn===an && fd===ad;
+  }
+
+  return false;
+}
+
+// 答えを帯分数文字列で返す（表示用）
+function toMixed(n, d){
+  const [rn,rd] = fracReduce(n,d);
+  if(rd===1) return String(rn);
+  if(rn < rd) return `${rn}/${rd}`;
+  const w = Math.floor(rn/rd), rem = rn % rd;
+  return rem===0 ? String(w) : `${w}と${rem}/${rd}`;
+}
+
 const CALC_GEN = {
-  "c1-たし算":  { grade:1, label:"たし算", gen:(r)=>{const a=1+r(9),b=1+r(9);return {q:`${a} + ${b}`,a:a+b};} },
-  "c1-ひき算":  { grade:1, label:"ひき算", gen:(r)=>{const a=2+r(8),b=1+r(a-1);return {q:`${a} - ${b}`,a:a-b};} },
-  "c2-たし算":  { grade:2, label:"たし算(2桁)", gen:(r)=>{const a=10+r(80),b=10+r(80);return {q:`${a} + ${b}`,a:a+b};} },
-  "c2-かけ算":  { grade:2, label:"九九", gen:(r)=>{const a=1+r(9),b=1+r(9);return {q:`${a} × ${b}`,a:a*b};} },
-  "c3-わり算":  { grade:3, label:"わり算", gen:(r)=>{const b=2+r(8),ans=1+r(9);return {q:`${b*ans} ÷ ${b}`,a:ans};} },
-  "c4-小数":    { grade:4, label:"小数のたし算", gen:(r)=>{const a=(1+r(40))/10,b=(1+r(40))/10;return {q:`${a.toFixed(1)} + ${b.toFixed(1)}`,a:Math.round((a+b)*10)/10};} },
-  "c5-小数かけ":{ grade:5, label:"小数のかけ算", gen:(r)=>{const a=(1+r(20))/10,b=1+r(8);return {q:`${a.toFixed(1)} × ${b}`,a:Math.round(a*b*10)/10};} },
-  "c6-分数":    { grade:6, label:"分数のたし算", gen:(r)=>{const d=2+r(6),n1=1+r(d-1),n2=1+r(d-1);return {q:`${n1}/${d} + ${n2}/${d}`,a:`${n1+n2}/${d}`};} },
+  "c1-たし算":   { grade:1, label:"たし算",       gen:(r)=>{const a=1+r(9),b=1+r(9);return {q:`${a} + ${b}`,a:a+b,type:"int"};} },
+  "c1-ひき算":   { grade:1, label:"ひき算",       gen:(r)=>{const a=2+r(8),b=1+r(a-1);return {q:`${a} - ${b}`,a:a-b,type:"int"};} },
+  "c2-たし算":   { grade:2, label:"たし算(2桁)",  gen:(r)=>{const a=10+r(80),b=10+r(80);return {q:`${a} + ${b}`,a:a+b,type:"int"};} },
+  "c2-かけ算":   { grade:2, label:"九九",         gen:(r)=>{const a=1+r(9),b=1+r(9);return {q:`${a} × ${b}`,a:a*b,type:"int"};} },
+  "c3-わり算":   { grade:3, label:"わり算",       gen:(r)=>{const b=2+r(8),ans=1+r(9);return {q:`${b*ans} ÷ ${b}`,a:ans,type:"int"};} },
+  "c4-小数":     { grade:4, label:"小数のたし算", gen:(r)=>{const a=(1+r(40))/10,b=(1+r(40))/10;return {q:`${a.toFixed(1)} + ${b.toFixed(1)}`,a:Math.round((a+b)*10)/10,type:"decimal"};} },
+  "c5-小数かけ": { grade:5, label:"小数のかけ算", gen:(r)=>{const a=(1+r(20))/10,b=1+r(8);return {q:`${a.toFixed(1)} × ${b}`,a:Math.round(a*b*10)/10,type:"decimal"};} },
+  "c6-分数たし": { grade:6, label:"分数のたし算", gen:(r)=>{
+    const d=2+r(7);
+    const n1=1+r(d-1), n2=1+r(d-1);
+    const [rn,rd]=fracReduce(n1+n2,d);
+    return {q:`FRAC:${n1}/${d}+${n2}/${d}`, a:toMixed(n1+n2,d), type:"frac", fracN:n1+n2, fracD:d};
+  }},
+  "c6-分数かけ": { grade:6, label:"分数のかけ算", gen:(r)=>{
+    // 分子同士・分母同士がかぶらないよう小さめの値で生成
+    const n1=1+r(5), d1=2+r(5), n2=1+r(5), d2=2+r(5);
+    const rN=n1*n2, rD=d1*d2;
+    return {q:`FRAC:${n1}/${d1}×${n2}/${d2}`, a:toMixed(rN,rD), type:"frac", fracN:rN, fracD:rD};
+  }},
+  "c6-分数わり": { grade:6, label:"分数のわり算", gen:(r)=>{
+    // a/b ÷ c/d = a*d / b*c
+    const n1=1+r(5), d1=2+r(5), n2=1+r(5), d2=2+r(5);
+    const rN=n1*d2, rD=d1*n2;
+    return {q:`FRAC:${n1}/${d1}÷${n2}/${d2}`, a:toMixed(rN,rD), type:"frac", fracN:rN, fracD:rD};
+  }},
 };
 
 // 日付シード（YYYY-MM-DD → 数値）。同じ日は同じシード。
@@ -176,27 +254,100 @@ function Confetti(){
   ));
 }
 
+/* ---- 分数をCSSで縦積み表示 ---- */
+function FracDisplay({ n, d, size=38 }){
+  return (
+    <span style={{display:"inline-flex",flexDirection:"column",alignItems:"center",
+      verticalAlign:"middle",lineHeight:1.1,margin:"0 4px"}}>
+      <span style={{fontSize:size*0.7,fontWeight:800,borderBottom:`3px solid #5a4a42`,
+        paddingBottom:2,minWidth:size*0.9,textAlign:"center"}}>{n}</span>
+      <span style={{fontSize:size*0.7,fontWeight:800,paddingTop:2,
+        minWidth:size*0.9,textAlign:"center"}}>{d}</span>
+    </span>
+  );
+}
+
+/* 問題文をパースしてJSX化（分数たし・かけ・わり対応） */
+function QuestionDisplay({ q }){
+  if(q.type==="frac" && q.q.startsWith("FRAC:")){
+    const body = q.q.slice(5); // 例: "2/3×3/4" or "1/2+3/4" or "2/3÷1/4"
+    // 演算子を検出（＋×÷）
+    const opMatch = body.match(/^(.+?)([+×÷])(.+)$/);
+    if(opMatch){
+      const [,rawL, op, rawR] = opMatch;
+      const [n1,d1] = rawL.split("/").map(Number);
+      const [n2,d2] = rawR.split("/").map(Number);
+      const opDisp = {"+":"＋","×":"×","÷":"÷"}[op] || op;
+      return (
+        <div style={{fontSize:38,fontWeight:800,textAlign:"center",margin:"18px 0",color:"#5a4a42",
+          display:"flex",alignItems:"center",justifyContent:"center",flexWrap:"wrap",gap:6}}>
+          <FracDisplay n={n1} d={d1}/>
+          <span>{opDisp}</span>
+          <FracDisplay n={n2} d={d2}/>
+          <span>＝ ?</span>
+        </div>
+      );
+    }
+  }
+  // 通常の問題
+  const display = q.q.replace(/\{(.+?)\}/g, "（$1）");
+  return (
+    <div style={{fontSize:36,fontWeight:800,textAlign:"center",margin:"18px 0",color:"#5a4a42"}}>
+      {display}{q.mode==="calc" && q.type!=="frac" && " = ?"}
+    </div>
+  );
+}
+
+/* 正答表示（帯分数・仮分数・整数を状況に応じて表示） */
+function AnswerDisplay({ q }){
+  if(q.type==="frac"){
+    const [rn,rd] = fracReduce(q.fracN, q.fracD);
+    // 整数
+    if(rd===1) return <span style={{fontSize:28,fontWeight:800}}>{rn}</span>;
+    // 帯分数（仮分数のとき）
+    if(rn > rd){
+      const w=Math.floor(rn/rd), rem=rn%rd;
+      return (
+        <span style={{display:"inline-flex",alignItems:"center",gap:4,fontSize:26,fontWeight:800}}>
+          {w}<span style={{fontSize:18,margin:"0 2px"}}>と</span><FracDisplay n={rem} d={rd} size={28}/>
+          <span style={{fontSize:14,color:"#999",marginLeft:4}}>または</span>
+          <FracDisplay n={rn} d={rd} size={28}/>
+        </span>
+      );
+    }
+    return <FracDisplay n={rn} d={rd} size={32}/>;
+  }
+  return <span style={{fontSize:22}}>{q.a}</span>;
+}
+
 /* ---- 1問コンポーネント（即答ボタン付き） ---- */
 function OneQuestion({ q, onFinish, allDone }){
   const [input, setInput] = useState("");
   const [picked, setPicked] = useState(null);
-  const [state, setState] = useState("idle"); // idle | answered | revealed
+  const [state, setState] = useState("idle");
   const [correct, setCorrect] = useState(false);
-  const [showAns, setShowAns] = useState(false);
 
   if(!q) return null;
+
+  // 正誤判定（分数は約分・整数化を考慮）
+  const checkAnswer=(ans)=>{
+    if(q.type==="frac"){
+      return fracEqual(ans, q.fracN, q.fracD);
+    }
+    return ans.trim()===String(q.a);
+  };
 
   const finish=(isRight, revealed=false)=>{
     setCorrect(isRight); setState(revealed?"revealed":"answered");
     onFinish({ questionId:q.id, unit:q.unit, mode:q.mode, correct:isRight });
   };
-  const submitInput=()=>{ if(!input.trim()) return; finish(input.trim()===String(q.a)); };
+  const submitInput=()=>{ if(!input.trim()) return; finish(checkAnswer(input)); };
   const submitChoice=(c)=>{ if(state!=="idle") return; setPicked(c); setTimeout(()=>finish(c===q.a),400); };
-  const reveal=()=>{ setState("revealed"); setShowAns(true); onFinish({ questionId:q.id, unit:q.unit, mode:q.mode, correct:false, skipped:true }); };
+  const reveal=()=>{ setState("revealed"); onFinish({ questionId:q.id, unit:q.unit, mode:q.mode, correct:false, skipped:true }); };
 
   const done = state!=="idle";
-  const display = q.q.replace(/\{(.+?)\}/g, "（$1）");
   const label = q.mode==="kanji"?"📖 かんじ":"🔢 けいさん";
+  const isFrac = q.type==="frac";
 
   return (
     <div className="card" style={{marginBottom:14}}>
@@ -204,9 +355,7 @@ function OneQuestion({ q, onFinish, allDone }){
         <span className="pill">{label}</span>
         {done && <span style={{fontSize:24}}>{correct?"🟩":"🟨"}</span>}
       </div>
-      <div style={{fontSize:36,fontWeight:800,textAlign:"center",margin:"18px 0",color:"#5a4a42"}}>
-        {display}{q.mode==="calc" && " = ?"}
-      </div>
+      <QuestionDisplay q={q}/>
 
       {!done ? (
         <>
@@ -219,9 +368,15 @@ function OneQuestion({ q, onFinish, allDone }){
             </div>
           ) : (
             <>
-              <input className="answer-in" inputMode={q.mode==="calc"?"decimal":"text"}
+              {isFrac && (
+                <p style={{fontSize:13,color:"#999",textAlign:"center",marginBottom:6}}>
+                  仮分数：7/4　帯分数：1と3/4　整数：2<br/>約分してから入力してね
+                </p>
+              )}
+              <input className="answer-in" inputMode={isFrac?"text":"decimal"}
                 value={input} onChange={e=>setInput(e.target.value)}
-                onKeyDown={e=>e.key==="Enter"&&submitInput()} placeholder="こたえ" autoFocus/>
+                onKeyDown={e=>e.key==="Enter"&&submitInput()}
+                placeholder={isFrac?"例: 3/4":"こたえ"} autoFocus/>
               <div style={{height:10}}/>
               <button className="btn-main" style={{fontSize:18,padding:14}} onClick={submitInput}>こたえる！</button>
             </>
@@ -235,10 +390,16 @@ function OneQuestion({ q, onFinish, allDone }){
       ) : (
         <div style={{textAlign:"center",padding:"8px 0"}}>
           {state==="revealed"
-            ? <div style={{fontSize:16,color:"#cc8a2c"}}>こたえ：<b style={{fontSize:22}}>{q.a}</b></div>
+            ? <div style={{fontSize:16,color:"#cc8a2c",display:"flex",alignItems:"center",justifyContent:"center",gap:6}}>
+                こたえ：<AnswerDisplay q={q}/>
+              </div>
             : <div style={{fontSize:20,fontWeight:800,color:correct?"#3ba85f":"#cc8a2c"}}>
                 {correct?"せいかい！":"おしい！"}
-                {!correct && <div style={{fontSize:15,marginTop:4}}>こたえ：<b>{q.a}</b></div>}
+                {!correct && (
+                  <div style={{fontSize:15,marginTop:6,display:"flex",alignItems:"center",justifyContent:"center",gap:6}}>
+                    こたえ：<AnswerDisplay q={q}/>
+                  </div>
+                )}
               </div>
           }
         </div>
@@ -473,7 +634,7 @@ function RosterEditor({ students, setStudents }){
 }
 
 /* ---- パスワード認証画面 ---- */
-const MASTER_PIN = "2361"; // ← ダウンロード後にここを自分だけ知る4桁に変える
+const MASTER_PIN = "0000"; // ← ダウンロード後にここを自分だけ知る4桁に変える
 
 function AuthGate({ classId, onAuth }){
   const [input, setInput] = useState("");
