@@ -171,22 +171,19 @@ const CALC_GEN = {
   "c4-小数":     { grade:4, label:"小数のたし算", gen:(r)=>{const a=(1+r(40))/10,b=(1+r(40))/10;return {q:`${a.toFixed(1)} + ${b.toFixed(1)}`,a:Math.round((a+b)*10)/10,type:"decimal"};} },
   "c5-小数かけ": { grade:5, label:"小数のかけ算", gen:(r)=>{const a=(1+r(20))/10,b=1+r(8);return {q:`${a.toFixed(1)} × ${b}`,a:Math.round(a*b*10)/10,type:"decimal"};} },
   "c6-分数たし": { grade:6, label:"分数のたし算", gen:(r)=>{
-    const d=2+r(7);
-    const n1=1+r(d-1), n2=1+r(d-1);
-    const [rn,rd]=fracReduce(n1+n2,d);
-    return {q:`FRAC:${n1}/${d}+${n2}/${d}`, a:toMixed(n1+n2,d), type:"frac", fracN:n1+n2, fracD:d};
+    const d=2+r(7), n1=1+r(d-1), n2=1+r(d-1);
+    return {q:"FRAC", op:"add", f1n:n1,f1d:d, f2n:n2,f2d:d,
+      a:toMixed(n1+n2,d), type:"frac", fracN:n1+n2, fracD:d};
   }},
   "c6-分数かけ": { grade:6, label:"分数のかけ算", gen:(r)=>{
-    // 分子同士・分母同士がかぶらないよう小さめの値で生成
     const n1=1+r(5), d1=2+r(5), n2=1+r(5), d2=2+r(5);
-    const rN=n1*n2, rD=d1*d2;
-    return {q:`FRAC:${n1}/${d1}×${n2}/${d2}`, a:toMixed(rN,rD), type:"frac", fracN:rN, fracD:rD};
+    return {q:"FRAC", op:"mul", f1n:n1,f1d:d1, f2n:n2,f2d:d2,
+      a:toMixed(n1*n2,d1*d2), type:"frac", fracN:n1*n2, fracD:d1*d2};
   }},
   "c6-分数わり": { grade:6, label:"分数のわり算", gen:(r)=>{
-    // a/b ÷ c/d = a*d / b*c
     const n1=1+r(5), d1=2+r(5), n2=1+r(5), d2=2+r(5);
-    const rN=n1*d2, rD=d1*n2;
-    return {q:`FRAC:${n1}/${d1}÷${n2}/${d2}`, a:toMixed(rN,rD), type:"frac", fracN:rN, fracD:rD};
+    return {q:"FRAC", op:"div", f1n:n1,f1d:d1, f2n:n2,f2d:d2,
+      a:toMixed(n1*d2,d1*n2), type:"frac", fracN:n1*d2, fracD:d1*n2};
   }},
 };
 
@@ -267,33 +264,25 @@ function FracDisplay({ n, d, size=38 }){
   );
 }
 
-/* 問題文をパースしてJSX化（分数たし・かけ・わり対応） */
+/* 問題文をJSX化（分数はフィールドから直接描画、文字列パース不要） */
 function QuestionDisplay({ q }){
-  if(q.type==="frac" && q.q.startsWith("FRAC:")){
-    const body = q.q.slice(5); // 例: "2/3×3/4" or "1/2+3/4" or "2/3÷1/4"
-    // 演算子を検出（半角 + × ÷ で統一）
-    const opMatch = body.match(/^(\d+\/\d+)([+\u00D7\u00F7])(\d+\/\d+)$/);
-    if(opMatch){
-      const [,rawL, op, rawR] = opMatch;
-      const [n1,d1] = rawL.split("/").map(Number);
-      const [n2,d2] = rawR.split("/").map(Number);
-      const opDisp = {"+":"＋","\u00D7":"×","\u00F7":"÷"}[op] || op;
-      return (
-        <div style={{fontSize:38,fontWeight:800,textAlign:"center",margin:"18px 0",color:"#5a4a42",
-          display:"flex",alignItems:"center",justifyContent:"center",flexWrap:"wrap",gap:6}}>
-          <FracDisplay n={n1} d={d1}/>
-          <span>{opDisp}</span>
-          <FracDisplay n={n2} d={d2}/>
-          <span>＝ ?</span>
-        </div>
-      );
-    }
+  if(q.type==="frac"){
+    const opLabel = {"add":"＋","mul":"×","div":"÷"}[q.op] || q.op;
+    return (
+      <div style={{fontSize:38,fontWeight:800,textAlign:"center",margin:"18px 0",color:"#5a4a42",
+        display:"flex",alignItems:"center",justifyContent:"center",flexWrap:"wrap",gap:6}}>
+        <FracDisplay n={q.f1n} d={q.f1d}/>
+        <span>{opLabel}</span>
+        <FracDisplay n={q.f2n} d={q.f2d}/>
+        <span>＝ ?</span>
+      </div>
+    );
   }
-  // 通常の問題
+  // 通常の問題（漢字・整数・小数）
   const display = q.q.replace(/\{(.+?)\}/g, "（$1）");
   return (
     <div style={{fontSize:36,fontWeight:800,textAlign:"center",margin:"18px 0",color:"#5a4a42"}}>
-      {display}{q.mode==="calc" && q.type!=="frac" && " = ?"}
+      {display}{q.mode==="calc" && " = ?"}
     </div>
   );
 }
