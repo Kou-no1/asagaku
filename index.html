@@ -516,6 +516,15 @@ function dateSeed(dateStr){ let h=0; for(const c of dateStr) h=(h*31+c.charCodeA
 function makeRand(seed){ let s=seed||1; return (n)=>{ s=(s*1103515245+12345)&0x7fffffff; return s%n; }; }
 function todayStr(){ const d=new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; }
 
+/* 全角→半角の正規化（数字・スラッシュ・記号）。計算の答え入力に使用 */
+function toHalfWidth(str){
+  return str
+    .replace(/[０-９]/g, c=>String.fromCharCode(c.charCodeAt(0)-0xFEE0))
+    .replace(/／/g,"/").replace(/／/g,"/")
+    .replace(/．/g,".").replace(/　/g," ")
+    .replace(/，/g,",");
+}
+
 /* 漢字の出題用「読み」を決める：訓読み優先、無ければ音読み */
 function kanjiYomi(item){
   return (item.yomi && item.yomi.length>0) ? item.yomi
@@ -731,7 +740,7 @@ function OneQuestion({ q, onFinish, allDone }){
                 </p>
               )}
               <input className="answer-in" inputMode={isFrac?"text":"decimal"}
-                value={input} onChange={e=>setInput(e.target.value)}
+                value={input} onChange={e=>setInput(toHalfWidth(e.target.value))}
                 onKeyDown={e=>e.key==="Enter"&&submitInput()}
                 placeholder={isFrac?"例: 3/4":"こたえ"} autoFocus/>
               <div style={{height:10}}/>
