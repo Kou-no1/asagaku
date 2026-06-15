@@ -272,12 +272,12 @@ function QuestionDisplay({ q }){
   if(q.type==="frac" && q.q.startsWith("FRAC:")){
     const body = q.q.slice(5); // 例: "2/3×3/4" or "1/2+3/4" or "2/3÷1/4"
     // 演算子を検出（半角 + × ÷ で統一）
-    const opMatch = body.match(/^(\d+\/\d+)([+×÷])(\d+\/\d+)$/);
+    const opMatch = body.match(/^(\d+\/\d+)([+\u00D7\u00F7])(\d+\/\d+)$/);
     if(opMatch){
       const [,rawL, op, rawR] = opMatch;
       const [n1,d1] = rawL.split("/").map(Number);
       const [n2,d2] = rawR.split("/").map(Number);
-      const opDisp = {"+":"＋","×":"×","÷":"÷"}[op] || op;
+      const opDisp = {"+":"＋","\u00D7":"×","\u00F7":"÷"}[op] || op;
       return (
         <div style={{fontSize:38,fontWeight:800,textAlign:"center",margin:"18px 0",color:"#5a4a42",
           display:"flex",alignItems:"center",justifyContent:"center",flexWrap:"wrap",gap:6}}>
