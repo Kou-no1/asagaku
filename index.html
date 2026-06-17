@@ -907,7 +907,7 @@ function PoolSetup({ pool, setPool }){
         </>
       ) : (
         <>
-          {/* 学年タブ */}
+          {/* grade-tab */}
           <div style={{display:"flex",gap:4,marginBottom:10,flexWrap:"wrap"}}>
             {[1,2,3,4,5,6].map(g=>(
               <button key={g} onClick={()=>{setSelGrade(g);setSelUnit(null);}}
@@ -1021,50 +1021,138 @@ function PoolSetup({ pool, setPool }){
 
 /* ---- 先生：ダッシュボード ---- */
 function Dashboard({ records, students }){
-  const date = todayStr();
-  const today = records.filter(r=>r.date===date);
-  const rate = today.length? Math.round(today.filter(r=>r.correct).length/today.length*100):0;
+  const [viewDate, setViewDate] = useState(todayStr());
 
-  // つまずき：不正解の多い問題/単元
-  const byUnit = {};
-  records.forEach(r=>{ byUnit[r.unit]=byUnit[r.unit]||{n:0,wrong:0}; byUnit[r.unit].n++; if(!r.correct)byUnit[r.unit].wrong++; });
-  const stumble = Object.entries(byUnit).map(([u,v])=>({u,...v,err:Math.round(v.wrong/v.n*100)}))
-    .sort((a,b)=>b.err-a.err);
+  // 日付を±1日移動
+  const moveDate=(delta)=>{
+    const d=new Date(viewDate); d.setDate(d.getDate()+delta);
+    const s=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+    setViewDate(s);
+  };
 
-  const heatColor=(ok)=> ok===null?"#ddd": ok?"#4ec27a":"#e85a5a";
+  // 表示日のレコード
+  const dayRecs = records.filter(r=>r.date===viewDate);
+
+  // 計算・漢字それぞれの正答率
+  const calcRecs = dayRecs.filter(r=>r.mode==="calc");
+  const kanjiRecs = dayRecs.filter(r=>r.mode==="kanji");
+  const pct=(arr)=> arr.length===0?"-":Math.round(arr.filter(r=>r.correct).length/arr.length*100)+"%";
+
+  // 全記録がある日付一覧（過去ナビ用）
+  const allDates = [...new Set(records.map(r=>r.date))].sort().reverse();
+
+  // 正誤セル
+  const cell=(mode)=>(s)=>{
+    const r=dayRecs.find(x=>x.studentId===s && x.mode===mode);
+    if(!r) return "-";
+    if(r.skipped) return <span style={{color:"#ccc",fontSize:16}}>{"👁"}</span>;
+    return <span style={{fontSize:20}}>{r.correct?"🟩":"🟨"}</span>;
+  };
+
+  // つまずき（全期間）
+  const byUnit={};
+  records.forEach(r=>{
+    if(r.skipped) return;
+    byUnit[r.unit]=byUnit[r.unit]||{n:0,wrong:0,mode:r.mode};
+    byUnit[r.unit].n++; if(!r.correct) byUnit[r.unit].wrong++;
+  });
+  const stumble=Object.entries(byUnit)
+    .map(([u,v])=>({u,...v,err:Math.round(v.wrong/v.n*100)}))
+    .filter(s=>s.n>=2).sort((a,b)=>b.err-a.err);
+
+  const isToday = viewDate===todayStr();
 
   return (
     <div>
-      <div className="card" style={{marginBottom:14,display:"flex",justifyContent:"space-around",textAlign:"center"}}>
-        <div><div style={{fontSize:32,fontWeight:800,color:"#ff7a3c"}}>{today.length}</div><div style={{fontSize:12,color:"#999"}}>今日の取組</div></div>
-        <div><div style={{fontSize:32,fontWeight:800,color:"#4ec27a"}}>{rate}%</div><div style={{fontSize:12,color:"#999"}}>正答率</div></div>
-        <div><div style={{fontSize:32,fontWeight:800,color:"#57b6ff"}}>{students.length}</div><div style={{fontSize:12,color:"#999"}}>在籍</div></div>
-      </div>
-
+      {/* date-nav */}
       <div className="card" style={{marginBottom:14}}>
-        <h3 style={{marginBottom:12}}>今日の取り組み状況</h3>
-        <table>
-          <thead><tr><th>なまえ</th><th>取組</th><th>正誤</th></tr></thead>
-          <tbody>
-            {students.map(s=>{
-              const r=today.find(x=>x.studentId===s);
-              return <tr key={s}><td>{s}</td><td>{r?"✅":"—"}</td>
-                <td>{r?<span className="heat" style={{background:heatColor(r.correct)}}>{r.correct?"○":"×"}</span>:""}</td></tr>;
-            })}
-          </tbody>
-        </table>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
+          <button onClick={()=>moveDate(-1)}
+            style={{fontSize:22,background:"none",color:"#cc6a2c",padding:"4px 10px",borderRadius:10}}>{"◀"}</button>
+          <div style={{textAlign:"center"}}>
+            <div style={{fontWeight:800,fontSize:16,color:"#5a4a42"}}>
+              {viewDate}{isToday&&<span style={{fontSize:12,color:"#ff7a3c",marginLeft:6}}>今日</span>}
+            </div>
+            {allDates.length>0 && (
+              <select value={viewDate} onChange={e=>setViewDate(e.target.value)}
+                style={{marginTop:6,fontSize:13,padding:"4px 8px",borderRadius:8,border:"1px solid #ffd6c0"}}>
+                {allDates.map(d=><option key={d} value={d}>{d}</option>)}
+                {!allDates.includes(viewDate)&&<option value={viewDate}>{viewDate}</option>}
+              </select>
+            )}
+          </div>
+          <button onClick={()=>moveDate(1)} disabled={isToday}
+            style={{fontSize:22,background:"none",color:isToday?"#ddd":"#cc6a2c",padding:"4px 10px",borderRadius:10}}>{"▶"}</button>
+        </div>
+
+        {/* summary */}
+        <div style={{display:"flex",justifyContent:"space-around",textAlign:"center"}}>
+          <div>
+            <div style={{fontSize:28,fontWeight:800,color:"#ff7a3c"}}>
+              {dayRecs.filter((r,i,a)=>a.findIndex(x=>x.studentId===r.studentId)===i).length}
+            </div>
+            <div style={{fontSize:12,color:"#999"}}>取組人数</div>
+          </div>
+          <div>
+            <div style={{fontSize:28,fontWeight:800,color:"#4ec27a"}}>{pct(calcRecs)}</div>
+            <div style={{fontSize:12,color:"#999"}}>🔢計算</div>
+          </div>
+          <div>
+            <div style={{fontSize:28,fontWeight:800,color:"#57b6ff"}}>{pct(kanjiRecs)}</div>
+            <div style={{fontSize:12,color:"#999"}}>📖漢字</div>
+          </div>
+        </div>
       </div>
 
+      {/* list */}
+      <div className="card" style={{marginBottom:14,overflowX:"auto"}}>
+        <h3 style={{marginBottom:12}}>取り組み状況</h3>
+        {dayRecs.length===0
+          ? <p style={{color:"#aaa",fontSize:14}}>この日の記録はありません</p>
+          : <table style={{fontSize:14}}>
+              <thead>
+                <tr>
+                  <th style={{textAlign:"left"}}>なまえ</th>
+                  <th>🔢計算</th>
+                  <th>📖漢字</th>
+                </tr>
+              </thead>
+              <tbody>
+                {students.map(s=>(
+                  <tr key={s}>
+                    <td style={{textAlign:"left",fontWeight:700}}>{s}</td>
+                    <td style={{textAlign:"center"}}>{cell("calc")(s)}</td>
+                    <td style={{textAlign:"center"}}>{cell("kanji")(s)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+        }
+        <p style={{fontSize:11,color:"#ccc",marginTop:8}}>{"🟩"}正解　{"🟨"}不正解　{"👁"}こたえみた　- 未取組</p>
+      </div>
+
+      {/* stumble */}
       <div className="card">
-        <h3 style={{marginBottom:12}}>つまずきやすい単元</h3>
-        {stumble.length===0? <p style={{color:"#aaa"}}>まだデータがありません</p> :
-          stumble.slice(0,6).map(s=>(
-            <div key={s.u} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:"1px solid #f0e8e0"}}>
-              <span style={{fontWeight:700}}>{CALC_GEN[s.u]?CALC_GEN[s.u].label:s.u.replace(/^k\d-/,"")}</span>
-              <span><span className="heat" style={{background:`hsl(${120-s.err*1.2},70%,55%)`,width:44}}>{s.err}%</span>
-                <span style={{fontSize:12,color:"#999",marginLeft:8}}>誤答率</span></span>
-            </div>
-          ))}
+        <h3 style={{marginBottom:12}}>つまずきやすい単元（全期間）</h3>
+        {stumble.length===0
+          ? <p style={{color:"#aaa"}}>まだデータがありません</p>
+          : stumble.slice(0,6).map(s=>(
+              <div key={s.u} style={{display:"flex",justifyContent:"space-between",
+                alignItems:"center",padding:"7px 0",borderBottom:"1px solid #f0e8e0"}}>
+                <span>
+                  <span style={{fontSize:12,marginRight:4}}>{s.mode==="calc"?"🔢":"📖"}</span>
+                  <span style={{fontWeight:700}}>{CALC_GEN[s.u]?CALC_GEN[s.u].label:s.u}</span>
+                </span>
+                <span style={{display:"flex",alignItems:"center",gap:6}}>
+                  <span className="heat"
+                    style={{background:`hsl(${120-s.err*1.2},70%,55%)`,width:44,textAlign:"center"}}>
+                    {s.err}%
+                  </span>
+                  <span style={{fontSize:11,color:"#999"}}>{s.n}回中{s.wrong}回誤答</span>
+                </span>
+              </div>
+            ))
+        }
       </div>
     </div>
   );
